@@ -57,3 +57,19 @@ class Q_AItem(scrapy.Item):
     # a_ut = scrapy.Field()
     q_id = scrapy.Field()
     a_uid = scrapy.Field()
+
+
+class TopicItem(scrapy.Item):
+    table_name = 'topic'
+
+    title = scrapy.Field()
+    content = scrapy.Field()
+    t_ct = scrapy.Field()
+    user_id = scrapy.Field()
+    views = scrapy.Field()
+    cover = scrapy.Field()
+
+    pic_list = scrapy.Field()
+    topic_id = scrapy.Field()
+
+

@@ -5,7 +5,7 @@
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://doc.scrapy.org/en/latest/topics/item-pipeline.html
 import pymysql
-from petshow_scrapy.items import ArticleItem, BaikeItem, Q_AItem
+from petshow_scrapy.items import ArticleItem, BaikeItem, Q_AItem, TopicItem
 
 from petshow_scrapy import settings
 
@@ -85,5 +85,30 @@ class PetshowScrapyPipeline(object):
                     'question_id': item['q_id'],
                     'user_id': item['a_uid'],
                 })
+                self.conn.commit()
+        elif isinstance(item, TopicItem):
+            item['user_id'] = 4
+            sql_t = 'insert into topic (title, content, create_time, update_time, user_id, views, cover) values (%(title)s, %(content)s, %(create_time)s, %(update_time)s, %(user_id)s, %(views)s, %(cover)s)'
+            sql_p = 'insert into topic_pic (pic, create_time, update_time, topic_id) values (%(pic)s, %(create_time)s, %(update_time)s, %(topic_id)s)'
+            with self.conn.cursor() as cursor:
+                cursor.execute(sql_t, {
+                    'title': item['title'],
+                    'content': item['content'],
+                    'create_time': item['t_ct'],
+                    'update_time': item['t_ct'],
+                    'user_id': item['user_id'],
+                    'views': item['views'],
+                    'cover': item['cover'],
+                })
+                cursor.execute('select last_insert_id()')
+                d = cursor.fetchall()
+                item['topic_id'] = d[0].get('last_insert_id()')
+                for pic in item['pic_list']:
+                    cursor.execute(sql_p, {
+                        'pic': pic,
+                        'create_time': item['t_ct'],
+                        'update_time': item['t_ct'],
+                        'topic_id': item['topic_id']
+                    })
                 self.conn.commit()
         return item
