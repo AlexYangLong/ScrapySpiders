@@ -73,3 +73,32 @@ class TopicItem(scrapy.Item):
     topic_id = scrapy.Field()
 
 
+class PetItem(scrapy.Item):
+    table_name = 'pet'
+
+    # pet info
+    owner_name = scrapy.Field()
+    owner_avatar = scrapy.Field()
+    pet_picture = scrapy.Field()
+    like_num = scrapy.Field()
+    tag = scrapy.Field()
+    create_time = scrapy.Field()
+    city = scrapy.Field()
+    v_second = scrapy.Field()
+    video = scrapy.Field()
+
+    # pet-doodle info
+    # user_avatar = scrapy.Field()
+    # doodle_time = scrapy.Field()
+    # pet_id = scrapy.Field()
+
+    doodle_list = scrapy.Field()
+
+    comment_list = scrapy.Field()
+
+    # doodles info
+    # angle = scrapy.Field()
+    # center_x = scrapy.Field()
+    # center_y = scrapy.Field()
+    # zoom = scrapy.Field()
+    # doodle_picture = scrapy.Field()

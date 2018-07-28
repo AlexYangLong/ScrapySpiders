@@ -5,22 +5,42 @@
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://doc.scrapy.org/en/latest/topics/item-pipeline.html
 import pymysql
-from petshow_scrapy.items import ArticleItem, BaikeItem, Q_AItem, TopicItem
+from petshow_scrapy.items import ArticleItem, BaikeItem, Q_AItem, TopicItem, PetItem
 
 from petshow_scrapy import settings
 
 
 class PetshowScrapyPipeline(object):
-    def __init__(self):
-        self.conn = pymysql.connect(host=settings.MYSQL_HOST,
-                                    user=settings.MYSQL_USER,
-                                    password=settings.MYSQL_PWD,
-                                    database=settings.MYSQL_DB,
-                                    port=settings.MYSQL_PORT,
+    def __init__(self, host, port, username, password, db_name):
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.db_name = db_name
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(
+            host=settings.MYSQL_HOST,
+            username=settings.MYSQL_USER,
+            password=settings.MYSQL_PWD,
+            db_name=settings.MYSQL_DB,
+            port=settings.MYSQL_PORT,
+        )
+
+    def open_spider(self, spider):
+        self.conn = pymysql.connect(host=self.host,
+                                    user=self.username,
+                                    password=self.password,
+                                    database=self.db_name,
+                                    port=self.port,
                                     charset='utf8',
                                     autocommit=False,
                                     cursorclass=pymysql.cursors.DictCursor  # cursorclass设置cursor游标的类型，这里设置的是dict类型
                                     )
+
+    def close_spider(self, spider):
+        self.conn.close()
 
     def process_item(self, item, spider):
         if isinstance(item, ArticleItem):
@@ -109,6 +129,64 @@ class PetshowScrapyPipeline(object):
                         'create_time': item['t_ct'],
                         'update_time': item['t_ct'],
                         'topic_id': item['topic_id']
+                    })
+                self.conn.commit()
+        elif isinstance(item, PetItem):
+            sql_t = 'insert into pet (username, avatar, picture, like_num, t, create_time, update_time, city, v_second, video) values (%(username)s, %(avatar)s, %(picture)s, %(like_num)s, %(t)s, %(create_time)s, %(update_time)s, %(city)s, %(v_second)s, %(video)s)'
+            sql_pd = 'insert into pet_doodle (avatar, create_time, update_time, pet_id) values (%(avatar)s, %(create_time)s, %(update_time)s, %(pet_id)s)'
+            sql_d = 'insert into doodles (angle, center_x, center_y, zoom, picture, is_turn, rect_upper_left_x, rect_upper_left_y, rect_width, rect_height, word, pd_id) values (%(angle)s, %(center_x)s, %(center_y)s, %(zoom)s, %(picture)s, %(is_turn)s, %(rect_upper_left_x)s, %(rect_upper_left_y)s, %(rect_width)s, %(rect_height)s, %(word)s, %(pd_id)s)'
+            sql_c = 'insert into pet_comment (username, avatar, content, city, create_time, update_time, pet_id) values (%(username)s, %(avatar)s, %(content)s, %(city)s, %(create_time)s, %(update_time)s, %(pet_id)s)'
+            with self.conn.cursor() as cursor:
+                cursor.execute(sql_t, {
+                    'username': item['owner_name'],
+                    'avatar': item['owner_avatar'],
+                    'picture': item['pet_picture'],
+                    'like_num': item['like_num'],
+                    't': item['tag'],
+                    'create_time': item['create_time'],
+                    'update_time': item['create_time'],
+                    'city': item['city'],
+                    'v_second': item['v_second'],
+                    'video': item['video']
+                })
+                cursor.execute('select last_insert_id()')
+                pet = cursor.fetchall()
+                pet_id = pet[0].get('last_insert_id()')
+                for pd in item['doodle_list']:
+                    cursor.execute(sql_pd, {
+                        'avatar': pd.get('user_avatar'),
+                        'create_time': pd.get('doodle_time'),
+                        'update_time': pd.get('doodle_time'),
+                        'pet_id': pet_id
+                    })
+                    cursor.execute('select last_insert_id()')
+                    p_d = cursor.fetchall()
+                    pd_id = p_d[0].get('last_insert_id()')
+                    for d in pd.get('doodle_list'):
+                        cursor.execute(sql_d, {
+                            'angle': d.get('angle'),
+                            'center_x': d.get('center_x'),
+                            'center_y': d.get('center_y'),
+                            'zoom': d.get('zoom'),
+                            'picture': d.get('picture'),
+                            'is_turn': d.get('is_turn'),
+                            'rect_upper_left_x': d.get('rect_upper_left_x'),
+                            'rect_upper_left_y': d.get('rect_upper_left_y'),
+                            'rect_width': d.get('rect_width'),
+                            'rect_height': d.get('rect_height'),
+                            'word': d.get('word'),
+                            'pd_id': pd_id
+                        })
+
+                for comment in item['comment_list']:
+                    cursor.execute(sql_c, {
+                        'username': comment.get('c_username'),
+                        'avatar': comment.get('c_avatar'),
+                        'content': comment.get('c_content'),
+                        'city': comment.get('c_city'),
+                        'create_time': comment.get('c_time'),
+                        'update_time': comment.get('c_time'),
+                        'pet_id': pet_id
                     })
                 self.conn.commit()
         return item

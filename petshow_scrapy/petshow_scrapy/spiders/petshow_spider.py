@@ -3,9 +3,9 @@ import re
 
 import scrapy
 from datetime import datetime
-from scrapy import FormRequest, Request
+from scrapy import FormRequest, Request, Selector
 
-from petshow_scrapy.items import ArticleItem, BaikeItem, Q_AItem, TopicItem
+from petshow_scrapy.items import ArticleItem, BaikeItem, Q_AItem, TopicItem, PetItem
 
 
 class PetShowSpider(scrapy.Spider):
@@ -54,7 +54,10 @@ class PetShowSpider(scrapy.Spider):
     q_a_c_url = 'http://www.petshow.cc/q/{qid}.html'
 
     # 涂鸦列表接口
-    ty_url = ''
+    ty_url = ['http://www.petshow.cc/v2/indexhotlist', 'http://www.petshow.cc/v2/indexnewestlist', 'http://www.petshow.cc/v2/indexvoicelist']
+    ty_c_url = 'http://www.petshow.cc/g/{tyid}.html'
+    ty_d_list = 'http://www.petshow.cc/v2/petalbumgraffitolist?pet_album_id={did}'
+    ty_comment = 'http://www.petshow.cc/v2/petalbumcommentlist?pet_album_id={cid}'
 
     def start_requests(self):
         """开始爬取"""
@@ -82,6 +85,18 @@ class PetShowSpider(scrapy.Spider):
         yield FormRequest(url=self.q_a_url.format(page='1'),
                           meta={'t': 'q'},
                           callback=self.parse_page)
+
+        for url in self.ty_url:
+            if 'voice' in url:
+                yield FormRequest(url=url,
+                                  formdata={'page':'1', 'pagesize':'200'},
+                                  meta={'t': 'ty', 'tag': '语音涂鸦'},
+                                  callback=self.parse_page)
+            else:
+                yield FormRequest(url=url,
+                                  formdata={'page': '1', 'pagesize': '200'},
+                                  meta={'t': 'ty', 'tag': '图片涂鸦'},
+                                  callback=self.parse_page)
 
     def parse_page(self, response):
         """解析总页数"""
@@ -119,6 +134,11 @@ class PetShowSpider(scrapy.Spider):
                                       meta={'t': 't'},
                                       callback=self.parse_t_list,
                                       dont_filter=True)
+                elif t == 'ty':
+                    yield FormRequest(url=response.url,
+                                      formdata={'page': str(i), 'pagesize': '200'},
+                                      meta={'t': 'ty', 'tag': response.meta.get('tag')},
+                                      callback=self.parse_ty_list)
         else:
             print('下载数据出错')
 
@@ -245,24 +265,129 @@ class PetShowSpider(scrapy.Spider):
                 item['pic_list'] = pics
                 yield item
 
-            # for i in range(1, page_count + 1):
-            #     yield FormRequest(url=self.topic_c_url,
-            #                       formdata={'tag_id': response.meta['id'], 'page': str(i), 'pagesize': '50'},
-            #                       meta={'title': response.meta['title'], 'content': response.meta['content'], 'views': response.meta['views'], 'cover': response.meta['cover']},
-            #                       callback=self.parse_tcp,
-            #                       dont_filter=True)
+    def parse_ty_list(self, response):
+        """解析涂鸦的列表"""
+        data = json.loads(response.text)
+        if data.get('data').get('list'):
+            list = data.get('data').get('list')
+            tag = response.meta.get('tag')
+            for ty in list:
+                # print(response.url, ty.get('id'))
+                pet_pic = ty.get('picture')
+                like_num = ty.get('like_num')
+                if ty.get('user'):
+                    owner_name = ty.get('user').get('nick')
+                    owner_avatar = ty.get('user').get('avatar')
+                else:
+                    owner_name = ''
+                    owner_avatar = ''
+                id = ty.get('id')
+                yield Request(url=self.ty_c_url.format(tyid=id),
+                              meta={'id': id, 'tag': tag, 'pet_pic': pet_pic, 'like_num': like_num, 'owner_name': owner_name, 'owner_avatar': owner_avatar},
+                              callback=self.parse_ty_content)
 
-    # def parse_tcp(self, response):
-    #     data = json.loads(response.text)
-    #     if data.get('data').get('list'):
-    #         list = data.get('data').get('list')
-    #         item = TopicItem()
-    #         item['title'] = response.meta.get('title')
-    #         item['content'] = response.meta.get('content')
-    #         item['views'] = response.meta.get('views')
-    #         item['cover'] = response.meta.get('cover')
-    #         item['t_ct'] = datetime.now()
-    #         item['pic_list'] = []
-    #         for tcp in list:
-    #             item['pic_list'].append(tcp.get('picture'))
-    #         yield item
+    def parse_ty_content(self, response):
+        """解析涂鸦内容页"""
+        html = Selector(response)
+        if html.xpath('//div[@class="pet-voice"]'):
+            v_second = html.xpath('//div[@class="pet-voice"]/text()').extract()[0]
+            video = html.xpath('//audio[@class="pet-music"]/@src').extract()[0]
+        else:
+            v_second = ''
+            video = ''
+
+        city = html.xpath('//div[@class="am_tuya_user_info_coordinate"]/text()').extract()[0].split(' ')[-1]
+        meta_d = {
+            'id': response.meta.get('id'),
+            'tag': response.meta.get('tag'),
+            'pet_pic': response.meta.get('pet_pic'),
+            'like_num': response.meta.get('like_num'),
+            'owner_name': response.meta.get('owner_name'),
+            'owner_avatar': response.meta.get('owner_avatar'),
+            'city': city,
+            'v_second': v_second,
+            'video': video
+        }
+        yield FormRequest(url=self.ty_d_list.format(did=response.meta.get('id')),
+                          meta=meta_d,
+                          callback=self.parse_doodle)
+
+    def parse_doodle(self, response):
+        """解析其他用户对图片的涂鸦内容"""
+        data = json.loads(response.text)
+        if data.get('data') and data.get('data').get('list'):
+            list = data.get('data').get('list')
+            if len(list) > 0:
+                create_time = list[-1].get('create_time')
+            else:
+                create_time = datetime.now()
+            pd_list = []
+            for doodle in list:
+                user = {}
+                user['user_avatar'] = doodle.get('avatar')
+                user['doodle_time'] = doodle.get('create_time')
+                user['doodle_list'] = []
+                for d in doodle.get('chartlet_list'):
+                    d_dict = {}
+                    d_dict['angle'] = d.get('angle')
+                    d_dict['center_x'] = d.get('center_x')
+                    d_dict['center_y'] = d.get('center_y')
+                    d_dict['zoom'] = d.get('zoom')
+                    d_dict['picture'] = d.get('picture')
+                    d_dict['is_turn'] = d.get('is_turn')
+                    d_dict['rect_upper_left_x'] = d.get('rect_upper_left_x')
+                    d_dict['rect_upper_left_y'] = d.get('rect_upper_left_y')
+                    d_dict['rect_width'] = d.get('rect_width')
+                    d_dict['rect_height'] = d.get('rect_height')
+                    d_dict['word'] = d.get('word')
+
+                    user['doodle_list'].append(d_dict)
+
+                pd_list.append(user)
+
+            meta_d = {
+                'id': response.meta.get('id'),
+                'tag': response.meta.get('tag'),
+                'pet_pic': response.meta.get('pet_pic'),
+                'like_num': response.meta.get('like_num'),
+                'owner_name': response.meta.get('owner_name'),
+                'owner_avatar': response.meta.get('owner_avatar'),
+                'city': response.meta.get('city'),
+                'v_second': response.meta.get('v_second'),
+                'video': response.meta.get('video'),
+                'doodle_list': pd_list,
+                'create_time': create_time
+            }
+            yield FormRequest(url=self.ty_comment.format(cid=response.meta.get('id')),
+                              meta=meta_d,
+                              callback=self.parse_comment)
+
+    def parse_comment(self, response):
+        """解析涂鸦评论"""
+        data = json.loads(response.text)
+        comment_list = []
+        if data.get('data') and data.get('data').get('list'):
+            list = data.get('data').get('list')
+            for comment in list:
+                c_d = {}
+                c_d['c_username'] = comment.get('user').get('nick')
+                c_d['c_avatar'] = comment.get('user').get('avatar')
+                c_d['c_city'] = comment.get('user').get('city')
+                c_d['c_content'] = comment.get('content')
+                c_d['c_time'] = comment.get('create_time')
+                comment_list.append(c_d)
+        item = PetItem()
+        item['owner_name'] = response.meta.get('owner_name')
+        item['owner_avatar'] = response.meta.get('owner_avatar')
+        item['pet_picture'] = response.meta.get('pet_pic')
+        item['like_num'] = response.meta.get('like_num')
+        item['tag'] = response.meta.get('tag')
+        item['create_time'] = response.meta.get('create_time')
+        item['city'] = response.meta.get('city')
+        item['v_second'] = response.meta.get('v_second')
+        item['video'] = response.meta.get('video')
+
+        item['doodle_list'] = response.meta.get('doodle_list')
+        item['comment_list'] = comment_list
+
+        yield item
